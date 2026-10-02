@@ -1,4 +1,4 @@
-const CACHE_NAME = "household-shell-v1";
+const CACHE_NAME = "household-shell-v3";
 const SHELL_FILES = [
   "./",
   "./index.html",

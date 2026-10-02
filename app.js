@@ -113,6 +113,12 @@ function isDue(task, now) {
   return dueDayStart.getTime() <= nowDayStart.getTime();
 }
 
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 // ---------- state ----------
 let currentUser = null;      // {uid, name, hint, email}
 let profilesCache = {};      // uid -> {name, hint, email}
@@ -122,12 +128,39 @@ let unsubTasks = null;
 let unsubLog = null;
 let editingTaskId = null;
 let selectedProfileForAuth = null;
+let selectedNewColor = null;
 let rolloverTimer = null;
+let activeTab = "home";
 
-function colorClassForUid(uid) {
-  if (!uid) return "tag-unassigned";
-  const idx = sortedProfileUids.indexOf(uid);
-  return idx % 2 === 0 ? "tag-a" : "tag-b";
+const PALETTE = [
+  "#C0613F", "#1F8A66", "#7B4FA0", "#B8364C",
+  "#C9970C", "#0E7C86", "#4C6E8A", "#555A64",
+];
+
+function fallbackColorForUid(uid) {
+  const idx = Math.max(0, sortedProfileUids.indexOf(uid));
+  return PALETTE[idx % PALETTE.length];
+}
+
+function colorForUid(uid) {
+  return profilesCache[uid]?.color || fallbackColorForUid(uid);
+}
+
+function initialForUid(uid) {
+  const name = profilesCache[uid]?.name || "?";
+  return name.trim().charAt(0).toUpperCase();
+}
+
+function buildAvatar(uid, opts = {}) {
+  const span = document.createElement("span");
+  span.className = `avatar${opts.small ? " small" : ""}${uid ? "" : " unassigned"}`;
+  if (uid && profilesCache[uid]) {
+    span.style.background = colorForUid(uid);
+    span.textContent = initialForUid(uid);
+  } else {
+    span.textContent = "–";
+  }
+  return span;
 }
 
 // ---------- profile fetch (works pre-auth: profiles are publicly readable) ----------
@@ -162,12 +195,6 @@ async function renderProfilePicker() {
   });
 }
 
-function escapeHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-
 function showAuthStep(step) {
   $("auth-step-pick").classList.toggle("hidden", step !== "pick");
   $("auth-step-password").classList.toggle("hidden", step !== "password");
@@ -175,12 +202,33 @@ function showAuthStep(step) {
 }
 
 // ---------- auth screen wiring ----------
-on("btn-show-add-person", "click", () => {
+function renderColorSwatches() {
+  const row = $("color-swatch-row");
+  row.innerHTML = "";
+  const usedColors = new Set(Object.values(profilesCache).map((p) => p.color).filter(Boolean));
+  selectedNewColor = PALETTE.find((c) => !usedColors.has(c)) || PALETTE[0];
+  PALETTE.forEach((color) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `swatch${color === selectedNewColor ? " selected" : ""}`;
+    btn.style.background = color;
+    btn.onclick = () => {
+      selectedNewColor = color;
+      row.querySelectorAll(".swatch").forEach((s) => s.classList.remove("selected"));
+      btn.classList.add("selected");
+    };
+    row.appendChild(btn);
+  });
+}
+
+on("btn-show-add-person", "click", async () => {
   $("input-new-name").value = "";
   $("input-new-password").value = "";
   $("input-new-hint").value = "";
   $("input-new-email").value = "";
   $("create-error").textContent = "";
+  await refreshProfilesCache();
+  renderColorSwatches();
   showAuthStep("create");
 });
 on("btn-back-to-pick", "click", () => showAuthStep("pick"));
@@ -241,6 +289,7 @@ on("btn-create-person", "click", async () => {
       name,
       hint: hint || null,
       email: emailInput || null,
+      color: selectedNewColor,
       createdAt: serverTimestamp(),
     });
   } catch (e) {
@@ -263,27 +312,26 @@ onAuthStateChanged(auth, async (user) => {
     $("me-badge").textContent = currentUser.name;
     await refreshProfilesCache();
     populateAssigneeSelect();
-    populateDoneFilterSelect();
-    showAppScreen();
+    populateFilterSelect($("filter-due"));
+    populateFilterSelect($("filter-upcoming"));
+    populateFilterSelect($("filter-done"));
+    $("home-signed-out").classList.add("hidden");
+    $("home-signed-in").classList.remove("hidden");
+    setTabsLocked(false);
     subscribeTasks();
     subscribeLog();
     startRollover();
+    switchTab("due");
   } else {
     teardown();
-    showAuthScreen();
+    $("home-signed-out").classList.remove("hidden");
+    $("home-signed-in").classList.add("hidden");
     showAuthStep("pick");
     renderProfilePicker();
+    setTabsLocked(true);
+    switchTab("home");
   }
 });
-
-function showAuthScreen() {
-  $("screen-auth").classList.remove("hidden");
-  $("screen-app").classList.add("hidden");
-}
-function showAppScreen() {
-  $("screen-auth").classList.add("hidden");
-  $("screen-app").classList.remove("hidden");
-}
 
 function teardown() {
   if (unsubTasks) unsubTasks();
@@ -292,6 +340,25 @@ function teardown() {
   tasksById = {};
   currentUser = null;
 }
+
+// ---------- tabs ----------
+function setTabsLocked(locked) {
+  document.querySelectorAll(".tab-btn[data-tab]").forEach((btn) => {
+    if (btn.dataset.tab === "home") return;
+    btn.disabled = locked;
+  });
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.id === `pane-${tab}`));
+  $("btn-add-task").classList.toggle("hidden", !currentUser || tab === "home" || tab === "log");
+}
+
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
 
 // ---------- selects ----------
 function populateAssigneeSelect() {
@@ -305,15 +372,17 @@ function populateAssigneeSelect() {
   });
 }
 
-function populateDoneFilterSelect() {
-  const sel = $("filter-done");
-  sel.innerHTML = '<option value="anyone">Anyone</option>';
+function populateFilterSelect(sel) {
+  const prev = sel.value;
+  sel.innerHTML = '<option value="mine">Mine</option><option value="anyone">Anyone</option>';
   sortedProfileUids.forEach((uid) => {
+    if (uid === currentUser.uid) return;
     const opt = document.createElement("option");
     opt.value = uid;
     opt.textContent = profilesCache[uid].name;
     sel.appendChild(opt);
   });
+  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
 }
 
 function buildDoneBySelect(currentUid) {
@@ -350,8 +419,7 @@ function subscribeTasks() {
     tasksById = {};
     snap.forEach((d) => { tasksById[d.id] = { id: d.id, ...d.data() }; });
     rolloverIfNeeded();
-    renderBoard();
-    renderManage();
+    renderAll();
   }, () => showToast("Having trouble syncing right now."));
 }
 
@@ -360,7 +428,7 @@ function subscribeLog() {
   unsubLog = onSnapshot(q, (snap) => {
     const rows = [];
     snap.forEach((d) => rows.push(d.data()));
-    renderLog(rows);
+    renderLogList(rows);
   });
 }
 
@@ -374,43 +442,176 @@ function rolloverIfNeeded() {
 }
 
 function startRollover() {
-  rolloverTimer = setInterval(() => { rolloverIfNeeded(); renderBoard(); }, 60000);
+  rolloverTimer = setInterval(() => { rolloverIfNeeded(); renderAll(); }, 60000);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") { rolloverIfNeeded(); renderBoard(); }
+    if (document.visibilityState === "visible") { rolloverIfNeeded(); renderAll(); }
   });
 }
 
-// ---------- board rendering ----------
-on("filter-todo", "change", renderBoard);
-on("filter-done", "change", renderBoard);
-
-function renderBoard() {
+function renderAll() {
   if (!currentUser) return;
-  const now = new Date();
-  const todoFilter = $("filter-todo").value;
-  const doneFilter = $("filter-done").value;
-
-  let todo = Object.values(tasksById).filter((t) => !t.done && isDue(t, now));
-  if (todoFilter === "mine") todo = todo.filter((t) => !t.assignedTo || t.assignedTo === currentUser.uid);
-  else if (todoFilter === "assigned-me") todo = todo.filter((t) => t.assignedTo === currentUser.uid);
-  todo.sort((a, b) => a.dueAt.toDate() - b.dueAt.toDate());
-
-  let done = Object.values(tasksById).filter((t) => t.done);
-  if (doneFilter !== "anyone") done = done.filter((t) => t.doneBy === doneFilter);
-  done.sort((a, b) => (b.doneAt?.toDate() ?? 0) - (a.doneAt?.toDate() ?? 0));
-
-  const todoList = $("list-todo");
-  todoList.innerHTML = "";
-  $("todo-empty").classList.toggle("hidden", todo.length > 0);
-  todo.forEach((t) => todoList.appendChild(renderTodoRow(t)));
-
-  const doneList = $("list-done");
-  doneList.innerHTML = "";
-  $("done-empty").classList.toggle("hidden", done.length > 0);
-  done.forEach((t) => doneList.appendChild(renderDoneRow(t)));
+  renderDue();
+  renderUpcoming();
+  renderDoneList();
+  renderAllTasks();
 }
 
-function renderTodoRow(task) {
+// matches an assignment-style filter (Due/Upcoming): "mine" counts unassigned too
+function matchesAssignFilter(value, assignedTo) {
+  if (value === "anyone") return true;
+  if (value === "mine") return !assignedTo || assignedTo === currentUser.uid;
+  return assignedTo === value;
+}
+
+// matches a "done by" filter (Done tab): no unassigned concept
+function matchesDoneFilter(value, doneBy) {
+  if (value === "anyone") return true;
+  if (value === "mine") return doneBy === currentUser.uid;
+  return doneBy === value;
+}
+
+function renderDue() {
+  const now = new Date();
+  const filterVal = $("filter-due").value;
+  let due = Object.values(tasksById).filter((t) => !t.done && isDue(t, now));
+  due = due.filter((t) => matchesAssignFilter(filterVal, t.assignedTo));
+  due.sort((a, b) => a.dueAt.toDate() - b.dueAt.toDate());
+
+  const list = $("list-due");
+  list.innerHTML = "";
+  $("due-empty").classList.toggle("hidden", due.length > 0);
+  due.forEach((t) => list.appendChild(renderOpenRow(t, "due")));
+}
+
+function renderUpcoming() {
+  const now = new Date();
+  const filterVal = $("filter-upcoming").value;
+  let upcoming = Object.values(tasksById).filter((t) => !t.done && !isDue(t, now));
+  upcoming = upcoming.filter((t) => matchesAssignFilter(filterVal, t.assignedTo));
+  upcoming.sort((a, b) => a.dueAt.toDate() - b.dueAt.toDate());
+
+  const list = $("list-upcoming");
+  list.innerHTML = "";
+  $("upcoming-empty").classList.toggle("hidden", upcoming.length > 0);
+  upcoming.forEach((t) => list.appendChild(renderOpenRow(t, "upcoming")));
+}
+
+function renderDoneList() {
+  const filterVal = $("filter-done").value;
+  let done = Object.values(tasksById).filter((t) => t.done);
+  done = done.filter((t) => matchesDoneFilter(filterVal, t.doneBy));
+  done.sort((a, b) => (b.doneAt?.toDate() ?? 0) - (a.doneAt?.toDate() ?? 0));
+
+  const list = $("list-done");
+  list.innerHTML = "";
+  $("done-empty").classList.toggle("hidden", done.length > 0);
+  done.forEach((t) => list.appendChild(renderDoneRow(t)));
+}
+
+on("filter-due", "change", renderDue);
+on("filter-upcoming", "change", renderUpcoming);
+on("filter-done", "change", renderDoneList);
+on("alltasks-search", "input", renderAllTasks);
+on("alltasks-sort", "change", renderAllTasks);
+
+function renderAllTasks() {
+  if (!currentUser) return;
+  const now = new Date();
+  const searchVal = $("alltasks-search").value.trim().toLowerCase();
+  const sortVal = $("alltasks-sort").value;
+
+  let all = Object.values(tasksById);
+  if (searchVal) all = all.filter((t) => t.title.toLowerCase().includes(searchVal));
+
+  const lastDoneMs = (t) => t.lastDoneAt?.toDate()?.getTime() ?? -Infinity;
+  if (sortVal === "alpha") all.sort((a, b) => a.title.localeCompare(b.title));
+  else if (sortVal === "recent") all.sort((a, b) => lastDoneMs(b) - lastDoneMs(a));
+  else if (sortVal === "stale") all.sort((a, b) => lastDoneMs(a) - lastDoneMs(b));
+
+  const list = $("list-alltasks");
+  list.innerHTML = "";
+  $("alltasks-empty").classList.toggle("hidden", all.length > 0);
+  all.forEach((t) => list.appendChild(renderAllTasksRow(t, now)));
+}
+
+function renderAllTasksRow(task, now) {
+  const li = document.createElement("li");
+  li.className = "task-row";
+
+  const avatar = buildAvatar(task.assignedTo);
+
+  const main = document.createElement("div");
+  main.className = "task-main";
+  const title = document.createElement("div");
+  title.className = "task-title";
+  title.textContent = task.title;
+
+  const meta = document.createElement("div");
+  meta.className = "task-meta";
+  const status = task.done ? "done" : (isDue(task, now) ? "due" : "upcoming");
+  const badge = document.createElement("span");
+  badge.className = `status-badge ${status}`;
+  badge.textContent = status === "done" ? "Done" : status === "due" ? "Due" : "Upcoming";
+  meta.appendChild(badge);
+
+  const freqNote = document.createElement("span");
+  freqNote.className = "freq-note";
+  freqNote.style.margin = "0";
+  const lastDone = task.lastDoneAt ? `last done ${fmtRelative(task.lastDoneAt.toDate())}` : "never done";
+  freqNote.textContent = `${freqSummary(task.freq)} · ${lastDone}`;
+  meta.appendChild(freqNote);
+
+  const editBtn = document.createElement("button");
+  editBtn.className = "text-btn";
+  editBtn.textContent = "Edit";
+  editBtn.onclick = () => openEditTaskModal(task);
+  meta.appendChild(editBtn);
+
+  main.appendChild(title);
+  main.appendChild(meta);
+
+  li.appendChild(avatar);
+  li.appendChild(main);
+  return li;
+}
+
+function fmtLogWhen(date) {
+  let h = date.getHours();
+  const ampm = h >= 12 ? "pm" : "am";
+  h = h % 12 || 12;
+  const mins = String(date.getMinutes()).padStart(2, "0");
+  const weekday = date.toLocaleDateString(undefined, { weekday: "long" });
+  const month = date.toLocaleDateString(undefined, { month: "long" });
+  return `${h}.${mins}${ampm}, ${weekday} ${month} ${date.getDate()}`;
+}
+
+function renderLogList(rows) {
+  const list = $("list-log");
+  list.innerHTML = "";
+  $("log-empty").classList.toggle("hidden", rows.length > 0);
+  rows.forEach((r) => {
+    const li = document.createElement("li");
+    li.className = "task-row log-row";
+    const avatar = buildAvatar(r.doneBy, { small: true });
+
+    const main = document.createElement("div");
+    main.className = "task-main";
+    const text = document.createElement("div");
+    text.className = "log-text";
+    text.innerHTML = `<strong>${escapeHtml(r.doneByName || "Someone")}</strong> completed ${escapeHtml(r.taskTitle)}`;
+    const when = document.createElement("span");
+    when.className = "log-when";
+    when.textContent = r.doneAt ? fmtLogWhen(r.doneAt.toDate()) : "";
+    main.appendChild(text);
+    main.appendChild(when);
+
+    li.appendChild(avatar);
+    li.appendChild(main);
+    list.appendChild(li);
+  });
+}
+
+function renderOpenRow(task, kind) {
   const li = document.createElement("li");
   li.className = "task-row";
 
@@ -424,24 +625,29 @@ function renderTodoRow(task) {
   const title = document.createElement("div");
   title.className = "task-title";
   title.textContent = task.title;
+
   const meta = document.createElement("div");
   meta.className = "task-meta";
-  const freqNote = document.createElement("span");
-  freqNote.className = "freq-note";
-  freqNote.textContent = `${freqSummary(task.freq)} · due ${fmtDue(task.dueAt.toDate(), task.hasTime)}`;
+  meta.appendChild(buildAvatar(task.assignedTo, { small: true }));
   meta.appendChild(buildAssigneeMiniSelect(task));
-  main.appendChild(title);
-  main.appendChild(meta);
-  main.appendChild(freqNote);
 
   const editBtn = document.createElement("button");
   editBtn.className = "text-btn";
   editBtn.textContent = "Edit";
   editBtn.onclick = () => openEditTaskModal(task);
+  meta.appendChild(editBtn);
+
+  const freqNote = document.createElement("span");
+  freqNote.className = "freq-note";
+  const verb = kind === "due" ? "due" : "next";
+  freqNote.textContent = `${freqSummary(task.freq)} · ${verb} ${fmtDue(task.dueAt.toDate(), task.hasTime)}`;
+
+  main.appendChild(title);
+  main.appendChild(meta);
+  main.appendChild(freqNote);
 
   li.appendChild(check);
   li.appendChild(main);
-  li.appendChild(editBtn);
   return li;
 }
 
@@ -460,21 +666,29 @@ function renderDoneRow(task) {
   const title = document.createElement("div");
   title.className = "task-title";
   title.textContent = task.title;
+
   const meta = document.createElement("div");
   meta.className = "task-meta";
+  meta.appendChild(buildAvatar(task.doneBy, { small: true }));
   const label = document.createElement("span");
   label.className = "freq-note";
+  label.style.margin = "0";
   label.textContent = "Done by";
   meta.appendChild(label);
-  meta.appendChild(buildDoneBySelect(task.doneBy));
+  const doneBySel = buildDoneBySelect(task.doneBy);
+  doneBySel.onchange = (e) => updateDoc(doc(db, "tasks", task.id), { doneBy: e.target.value });
+  meta.appendChild(doneBySel);
   const when = document.createElement("span");
   when.className = "freq-note";
+  when.style.margin = "0";
   when.textContent = task.doneAt ? fmtRelative(task.doneAt.toDate()) : "";
   meta.appendChild(when);
 
-  meta.querySelector("select").onchange = (e) => {
-    updateDoc(doc(db, "tasks", task.id), { doneBy: e.target.value });
-  };
+  const editBtn = document.createElement("button");
+  editBtn.className = "text-btn";
+  editBtn.textContent = "Edit";
+  editBtn.onclick = () => openEditTaskModal(task);
+  meta.appendChild(editBtn);
 
   main.appendChild(title);
   main.appendChild(meta);
@@ -491,6 +705,7 @@ async function markDone(task) {
     done: true,
     doneBy: currentUser.uid,
     doneAt: serverTimestamp(),
+    lastDoneAt: serverTimestamp(),
     dueAt: Timestamp.fromDate(nextDue),
     prevDueAt,
   });
@@ -510,80 +725,6 @@ async function unmarkDone(task) {
     doneBy: null,
     doneAt: null,
     dueAt: task.prevDueAt || task.dueAt,
-  });
-}
-
-// ---------- tabs ----------
-document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    const tab = btn.dataset.tab;
-    ["board", "manage", "log"].forEach((t) => $(`tab-${t}`).classList.toggle("hidden", t !== tab));
-    $("btn-add-task").classList.toggle("hidden", tab === "log");
-  });
-});
-
-// ---------- manage tab ----------
-function renderManage() {
-  const list = $("list-manage");
-  list.innerHTML = "";
-  const all = Object.values(tasksById).sort((a, b) => a.title.localeCompare(b.title));
-  $("manage-empty").classList.toggle("hidden", all.length > 0);
-  all.forEach((task) => {
-    const li = document.createElement("li");
-    li.className = "manage-row";
-
-    const main = document.createElement("div");
-    main.className = "task-main";
-    const title = document.createElement("div");
-    title.className = "task-title";
-    title.textContent = task.title;
-    const meta = document.createElement("div");
-    meta.className = "task-meta";
-    const tag = document.createElement("span");
-    tag.className = `tag ${colorClassForUid(task.assignedTo)}`;
-    tag.textContent = task.assignedTo ? profilesCache[task.assignedTo]?.name ?? "?" : "Unassigned";
-    const freqNote = document.createElement("span");
-    freqNote.className = "freq-note";
-    freqNote.textContent = `${freqSummary(task.freq)} · next ${fmtDue(task.dueAt.toDate(), task.hasTime)}${task.done ? " (currently done)" : ""}`;
-    meta.appendChild(tag);
-    meta.appendChild(freqNote);
-    main.appendChild(title);
-    main.appendChild(meta);
-
-    const actions = document.createElement("div");
-    actions.className = "manage-actions";
-    const editBtn = document.createElement("button");
-    editBtn.className = "text-btn";
-    editBtn.textContent = "Edit";
-    editBtn.onclick = () => openEditTaskModal(task);
-    const delBtn = document.createElement("button");
-    delBtn.className = "text-btn danger";
-    delBtn.textContent = "Delete";
-    delBtn.onclick = () => {
-      if (confirm(`Delete "${task.title}" for good?`)) deleteDoc(doc(db, "tasks", task.id));
-    };
-    actions.appendChild(editBtn);
-    actions.appendChild(delBtn);
-
-    li.appendChild(main);
-    li.appendChild(actions);
-    list.appendChild(li);
-  });
-}
-
-// ---------- log tab ----------
-function renderLog(rows) {
-  const list = $("list-log");
-  list.innerHTML = "";
-  $("log-empty").classList.toggle("hidden", rows.length > 0);
-  rows.forEach((r) => {
-    const li = document.createElement("li");
-    li.className = "log-row";
-    const when = r.doneAt ? fmtRelative(r.doneAt.toDate()) : "";
-    li.innerHTML = `<strong>${escapeHtml(r.doneByName || "Someone")}</strong> did ${escapeHtml(r.taskTitle)} &middot; ${when}`;
-    list.appendChild(li);
   });
 }
 
@@ -699,7 +840,10 @@ async function deleteTask() {
 
 // ---------- connection status ----------
 function updateSyncDot() {
-  $("sync-dot").classList.toggle("offline", !navigator.onLine);
+  const offline = !navigator.onLine;
+  $("sync-dot").classList.toggle("offline", offline);
+  const t = $("sync-text");
+  if (t) t.textContent = offline ? "Offline — changes will sync later" : "Synced";
 }
 window.addEventListener("online", updateSyncDot);
 window.addEventListener("offline", updateSyncDot);
