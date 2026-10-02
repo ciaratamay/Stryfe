@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Household</title>
+<meta name="theme-color" content="#2F6659" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- ================= AUTH SCREEN ================= -->
+<div id="screen-auth">
+  <div class="auth-card">
+
+    <!-- Step: pick a profile -->
+    <div id="auth-step-pick">
+      <h1>Household</h1>
+      <p class="sub">Who's this?</p>
+      <div class="profile-list" id="profile-list"></div>
+      <p id="profile-list-empty" class="hint-text hidden">No one's set up yet — add the first person below.</p>
+      <button class="link-btn" id="btn-show-add-person">+ Add a person</button>
+    </div>
+
+    <!-- Step: enter password for chosen profile -->
+    <div id="auth-step-password" class="hidden">
+      <button class="back-btn" id="btn-back-to-pick">&larr; Back</button>
+      <h1 id="password-step-name">Hi</h1>
+      <p class="sub">Enter your password to continue.</p>
+      <div class="field">
+        <label for="input-password">Password</label>
+        <input type="password" id="input-password" autocomplete="current-password" />
+      </div>
+      <p class="error-text" id="password-error"></p>
+      <button class="primary-btn" id="btn-sign-in">Continue</button>
+      <button class="link-btn" id="btn-show-hint">Forgot it? Show hint</button>
+      <p class="hint-text hidden" id="hint-display"></p>
+      <button class="link-btn hidden" id="btn-send-reset">Email me a reset link</button>
+    </div>
+
+    <!-- Step: create a new person -->
+    <div id="auth-step-create" class="hidden">
+      <button class="back-btn" id="btn-back-to-pick-2">&larr; Back</button>
+      <h1>Add a person</h1>
+      <p class="sub">Set a name and password for this device (and any other device they'll use).</p>
+      <div class="field">
+        <label for="input-new-name">Name</label>
+        <input type="text" id="input-new-name" autocomplete="given-name" maxlength="30" />
+      </div>
+      <div class="field">
+        <label for="input-new-password">Password</label>
+        <input type="password" id="input-new-password" autocomplete="new-password" />
+        <p class="hint-text">6 characters minimum &mdash; it doesn't need to be strong, just enough to keep the wrong person out of the wrong profile.</p>
+      </div>
+      <div class="field">
+        <label for="input-new-hint">Password hint (optional)</label>
+        <input type="text" id="input-new-hint" maxlength="60" />
+      </div>
+      <div class="field">
+        <label for="input-new-email">Email (optional, for password reset)</label>
+        <input type="email" id="input-new-email" autocomplete="email" />
+        <p class="hint-text">Only used if you forget your password. Leave blank if you'd rather not — you just won't be able to reset it yourself later.</p>
+      </div>
+      <p class="error-text" id="create-error"></p>
+      <button class="primary-btn" id="btn-create-person">Create &amp; continue</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================= MAIN APP ================= -->
+<div id="screen-app" class="hidden">
+
+  <div class="topbar">
+    <h1>Household</h1>
+    <div class="topbar-right">
+      <span class="sync-dot" id="sync-dot"></span>
+      <span class="me-badge" id="me-badge"></span>
+      <button class="icon-btn" id="btn-sign-out">Switch user</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="board">Board</button>
+    <button class="tab-btn" data-tab="manage">All tasks</button>
+    <button class="tab-btn" data-tab="log">Activity log</button>
+  </div>
+
+  <!-- Board tab: To-do / Done -->
+  <div class="board" id="tab-board">
+    <div class="board-cols">
+
+      <div class="col col-todo">
+        <div class="col-head">
+          <h2>To do</h2>
+          <select class="filter-select" id="filter-todo">
+            <option value="mine">All mine</option>
+            <option value="assigned-me">Assigned to me</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+        <ul class="task-list" id="list-todo"></ul>
+        <p class="empty-note hidden" id="todo-empty">Nothing due. Nicely done.</p>
+      </div>
+
+      <div class="col col-done">
+        <div class="col-head">
+          <h2>Done</h2>
+          <select class="filter-select" id="filter-done">
+            <option value="anyone">Anyone</option>
+          </select>
+        </div>
+        <ul class="task-list" id="list-done"></ul>
+        <p class="empty-note hidden" id="done-empty">Nothing checked off yet.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Manage tab: master list of all tasks -->
+  <div class="board hidden" id="tab-manage">
+    <ul class="manage-list" id="list-manage"></ul>
+    <p class="empty-note hidden" id="manage-empty">No tasks yet — add the first one.</p>
+  </div>
+
+  <!-- Log tab -->
+  <div class="board hidden" id="tab-log">
+    <ul class="log-list" id="list-log"></ul>
+    <p class="empty-note hidden" id="log-empty">Nothing logged yet.</p>
+  </div>
+
+  <button class="fab" id="btn-add-task">+ Add task</button>
+
+</div>
+
+<!-- ================= TASK MODAL ================= -->
+<div class="modal-backdrop hidden" id="task-modal-backdrop">
+  <div class="modal">
+    <h2 id="task-modal-title">Add task</h2>
+
+    <div class="field">
+      <label for="input-task-title">Task</label>
+      <input type="text" id="input-task-title" maxlength="80" />
+    </div>
+
+    <div class="field">
+      <label for="input-task-freq">Repeats</label>
+      <select id="input-task-freq">
+        <option value="once">One-off (no repeat)</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="custom-days">Every N days</option>
+        <option value="custom-weeks">Every N weeks on a day</option>
+        <option value="monthly">Monthly on a date</option>
+      </select>
+    </div>
+
+    <div class="modal-row hidden" id="row-interval-days">
+      <div class="field">
+        <label for="input-interval-n">Every how many days</label>
+        <input type="number" id="input-interval-n" min="1" value="2" />
+      </div>
+    </div>
+
+    <div class="modal-row hidden" id="row-weekday">
+      <div class="field">
+        <label for="input-weekday">Day of week</label>
+        <select id="input-weekday">
+          <option value="0">Sunday</option>
+          <option value="1">Monday</option>
+          <option value="2">Tuesday</option>
+          <option value="3">Wednesday</option>
+          <option value="4">Thursday</option>
+          <option value="5">Friday</option>
+          <option value="6">Saturday</option>
+        </select>
+      </div>
+      <div class="field hidden" id="wrap-interval-weeks">
+        <label for="input-interval-weeks">Every how many weeks</label>
+        <input type="number" id="input-interval-weeks" min="1" value="2" />
+      </div>
+    </div>
+
+    <div class="modal-row hidden" id="row-monthday">
+      <div class="field">
+        <label for="input-monthday">Day of month (1&ndash;28)</label>
+        <input type="number" id="input-monthday" min="1" max="28" value="1" />
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <div class="field">
+        <label for="input-task-date">First/next due date</label>
+        <input type="date" id="input-task-date" />
+      </div>
+      <div class="field">
+        <label for="input-task-time">Time (optional)</label>
+        <input type="time" id="input-task-time" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="input-task-assignee">Assigned to</label>
+      <select id="input-task-assignee">
+        <option value="">Unassigned</option>
+      </select>
+    </div>
+
+    <p class="error-text" id="task-modal-error"></p>
+
+    <div class="modal-actions">
+      <button class="text-btn danger hidden" id="btn-delete-task">Delete task</button>
+      <div style="flex:1"></div>
+      <button class="icon-btn" id="btn-cancel-task">Cancel</button>
+      <button class="primary-btn" id="btn-save-task">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Firebase config — fill in with your project's values (Firebase console -> Project settings -> General -> Your apps -> SDK setup and configuration) -->
+<script>
+  window.FIREBASE_CONFIG = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+</script>
+
+<script type="module" src="app.js"></script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+
+</body>
+</html>
