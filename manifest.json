@@ -1,6 +1,6 @@
 {
-  "name": "Household Tasks",
-  "short_name": "Household",
+  "name": "Choretl",
+  "short_name": "Choretl",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
